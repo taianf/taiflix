@@ -377,6 +377,60 @@ class ServarrWire:
             f"{name} download client and root folder ({root_folder}) configured."
         )
 
+    def configure_arr_jellyfin_notify(
+        self, name: str, base_url: str, api_key: str, jellyfin_token: str
+    ):
+        """Add a 'Connect -> Jellyfin' notification on Sonarr/Radarr so they
+        refresh Jellyfin's library when an import happens. Idempotent: skips
+        if a connection with the same name already exists."""
+        if name not in ("Sonarr", "Radarr"):
+            return
+        api_version = "v3"
+        headers = {"X-Api-Key": api_key}
+
+        # 1. List existing notifications; skip if Jellyfin already wired
+        list_status, existing, _ = http_request(
+            f"{base_url}/api/{api_version}/notification", headers=headers
+        )
+        if list_status == 200 and isinstance(existing, list):
+            for n in existing:
+                if isinstance(n, dict) and n.get("implementation") == "Jellyfin":
+                    logger.info(
+                        f"{name}: Jellyfin notification already wired, skipping."
+                    )
+                    return
+
+        # 2. Parse Jellyfin URL -> host/port/ssl
+        jf = urllib.parse.urlparse(URLS["jellyfin"])
+        jf_host = jf.hostname or "jellyfin"
+        jf_port = jf.port or 8080
+        jf_ssl = (jf.scheme or "http") == "https"
+
+        payload = {
+            "name": "Jellyfin",
+            "implementation": "Jellyfin",
+            "configContract": "JellyfinSettings",
+            "fields": [
+                {"name": "host", "value": jf_host},
+                {"name": "port", "value": jf_port},
+                {"name": "useSsl", "value": jf_ssl},
+                {"name": "apiKey", "value": jellyfin_token},
+                {"name": "sendNotifications", "value": False},
+            ],
+        }
+        status, body, _ = http_request(
+            f"{base_url}/api/{api_version}/notification",
+            method="POST",
+            data=payload,
+            headers=headers,
+        )
+        if status in (200, 201):
+            logger.info(f"{name}: Jellyfin notification wired.")
+        else:
+            logger.warning(
+                f"{name}: Jellyfin notification POST failed status={status} body={body}"
+            )
+
     def configure_bazarr(self):
         """Connects Bazarr to Sonarr and Radarr."""
         logger.info("--> Configuring Bazarr...")
@@ -439,6 +493,7 @@ class ServarrWire:
     def _jellyfin_login(self) -> str | None:
         """Authenticate to Jellyfin and return the AccessToken."""
         base = URLS["jellyfin"]
+        self._jellyfin_token: str | None = None
         # Jellyfin serves an HTML migration status page (HTTP 200) while
         # it's still applying first-boot DB migrations. /System/Info/Public
         # only returns JSON once migrations finish. Poll until we get a
@@ -484,6 +539,7 @@ class ServarrWire:
                     logger.info(
                         f"Created admin '{JELLYFIN_USERNAME}' via first-run, using returned token."
                     )
+                    self._jellyfin_token = token
                     return token
                 logger.warning(
                     "/Startup/FirstUser returned 200 but no token; falling back to login"
@@ -533,6 +589,7 @@ class ServarrWire:
             token = body.get("AccessToken") or body.get("Token")
             if token:
                 logger.info(f"Authenticated to Jellyfin as '{JELLYFIN_USERNAME}'.")
+                self._jellyfin_token = token
                 return token
         logger.warning(f"Jellyfin login failed (status={status}, body={body})")
         return None
@@ -605,6 +662,114 @@ class ServarrWire:
                     f"Failed to create library '{name}' (status={status} body={body})"
                 )
 
+    def configure_jellyseerr(self, jellyfin_token: str | None):
+        """Wire Jellyseerr to Jellyfin + Radarr + Sonarr. Best-effort.
+        Performs first-run setup via the setup API, then POSTs the three
+        server connections. If Jellyfin admin is missing, logs and skips.
+        """
+        if not jellyfin_token:
+            logger.warning("Skipping Jellyseerr wiring (no Jellyfin admin token yet).")
+            return
+        base = URLS["jellyseerr"].rstrip("/")
+        api = f"{base}/api/v1"
+
+        # 1. First-run setup if needed (POST /setup)
+        s, body, _ = http_request(f"{api}/setup")
+        if isinstance(body, dict) and body.get("setupRequired") is True:
+            logger.info("Jellyseerr first-run setup required; submitting...")
+            setup_payload = {
+                "username": JELLYFIN_USERNAME,
+                "password": JELLYFIN_ADMIN_PASSWORD,
+            }
+            # The endpoint varies by fork/version; try the common ones
+            for ep in ("/setup/finish", "/setup"):
+                http_request(f"{api}{ep}", method="POST", data=setup_payload)
+            time.sleep(2)
+
+        # 2. Login to get API key (admin user in Jellyseerr is independent
+        #    of Jellyfin; we use the same ADMIN_PASSWORD for parity)
+        for user_pwd in (
+            (JELLYFIN_USERNAME, JELLYFIN_ADMIN_PASSWORD),
+            ("admin", JELLYFIN_ADMIN_PASSWORD),
+        ):
+            status, login, _ = http_request(
+                f"{api}/auth/login",
+                method="POST",
+                data={"username": user_pwd[0], "password": user_pwd[1]},
+            )
+            if status == 200 and isinstance(login, dict):
+                if "password" in login:  # jellyseerr-style login response
+                    break
+
+        # 3. Get current settings to know existing API keys
+        s, main_settings, _ = http_request(f"{api}/settings/main")
+        api_key = (
+            main_settings.get("apiKey") if isinstance(main_settings, dict) else None
+        )
+        if not api_key:
+            # Generate one
+            s, key_resp, _ = http_request(
+                f"{api}/settings/main/regenerate", method="POST"
+            )
+            if isinstance(key_resp, dict):
+                api_key = key_resp.get("apiKey")
+        if not api_key:
+            logger.warning(
+                "Jellyseerr setup didn't produce an API key; wiring skipped."
+            )
+            return
+        auth = {"X-Api-Key": api_key}
+
+        # 4. Configure Jellyfin, Radarr, Sonarr server connections
+        jf = urllib.parse.urlparse(URLS["jellyfin"])
+        rd = urllib.parse.urlparse(URLS["radarr"])
+        sn = urllib.parse.urlparse(URLS["sonarr"])
+        for label, port, url, key_env, kind, is_default in [
+            ("Jellyfin", 8096, f"{jf.scheme}://{jf.hostname}", None, "jellyfin", True),
+            (
+                "Radarr",
+                7878,
+                f"{rd.scheme}://{rd.hostname}",
+                RADARR_API_KEY,
+                "radarr",
+                False,
+            ),
+            (
+                "Sonarr",
+                8989,
+                f"{sn.scheme}://{sn.hostname}",
+                SONARR_API_KEY,
+                "sonarr",
+                False,
+            ),
+        ]:
+            payload: dict[str, Any] = {
+                "name": label,
+                "hostname": urllib.parse.urlparse(url).hostname,
+                "port": port,
+                "ssl": (urllib.parse.urlparse(url).scheme or "http") == "https",
+                "baseUrl": "",
+                "enabled": True,
+                "is4k": False,
+                "isDefault": is_default,
+                "activeProfileId": 1,
+            }
+            if kind == "jellyfin":
+                payload["url"] = url
+                payload["apiKey"] = jellyfin_token
+                payload["externalHost"] = url
+                payload["jellyfinLibraryId"] = None
+                payload["userName"] = JELLYFIN_USERNAME
+            else:
+                payload["apiKey"] = key_env
+            s, body, _ = http_request(
+                f"{api}/settings/{kind}", method="POST", data=payload, headers=auth
+            )
+            if s in (200, 201):
+                logger.info(f"Jellyseerr: connected to {label}.")
+            else:
+                logger.warning(f"Jellyseerr -> {label} failed status={s} body={body}")
+
 
 def main():
     logger.info("==========================================================")
@@ -622,6 +787,7 @@ def main():
     wait_for_service("Lidarr", URLS["lidarr"], "/api/v1/system/status", LIDARR_API_KEY)
     wait_for_service("Bazarr", URLS["bazarr"], "/api/system/status", BAZARR_API_KEY)
     wait_for_service("Jellyfin", URLS["jellyfin"], "/health")
+    wait_for_service("Jellyseerr", URLS["jellyseerr"], "/api/v1/status")
 
     # 2. Execute wiring orchestration
     wire = ServarrWire()
@@ -670,6 +836,29 @@ def main():
         wire.configure_jellyfin_libraries()
     except Exception as e:
         logger.warning(f"Jellyfin library wiring step failed: {e}")
+
+    # Wire Sonarr/Radarr -> Jellyfin notify-on-import (needs Jellyfin token).
+    # Token comes from configure_jellyfin_libraries; if that failed the notify
+    # step is a no-op.
+    jf_token = getattr(wire, "_jellyfin_token", None)
+    if jf_token:
+        for label, base_url, api_key in [
+            ("Sonarr", URLS["sonarr"], SONARR_API_KEY),
+            ("Radarr", URLS["radarr"], RADARR_API_KEY),
+        ]:
+            try:
+                wire.configure_arr_jellyfin_notify(label, base_url, api_key, jf_token)
+            except Exception as e:
+                logger.warning(f"{label} -> Jellyfin notify failed: {e}")
+    else:
+        logger.info(
+            "Skipping Sonarr/Radarr -> Jellyfin notify (no Jellyfin admin token)."
+        )
+
+    try:
+        wire.configure_jellyseerr(jf_token)
+    except Exception as e:
+        logger.warning(f"Jellyseerr wiring step failed: {e}")
 
     logger.info("==========================================================")
     logger.info("   Taiflix Servarr Cross-Service Auto-Wiring COMPLETE    ")
