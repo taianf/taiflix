@@ -575,23 +575,34 @@ class ServarrWire:
                 if s not in (200, 204):
                     logger.warning(f"{ep} returned {s} (continuing)")
 
-        auth_payload = {
-            "Username": JELLYFIN_USERNAME,
-            "Pw": JELLYFIN_ADMIN_PASSWORD,
-        }
-        status, body, _ = http_request(
-            f"{base}/Users/AuthenticateByName",
-            method="POST",
-            data=auth_payload,
-            headers=self._jellyfin_auth_header(),
+        # Try empty password first (for users seeded by seed_jellyfin_admin_if_missing
+        # with NULL password), then fall back to the real password (for users created
+        # manually via the UI). Jellyfin's DefaultAuthenticationProvider accepts empty
+        # only when BOTH stored and supplied are empty.
+        for pw_attempt in ("", JELLYFIN_ADMIN_PASSWORD):
+            auth_payload = {
+                "Username": JELLYFIN_USERNAME,
+                "Pw": pw_attempt,
+            }
+            status, body, _ = http_request(
+                f"{base}/Users/AuthenticateByName",
+                method="POST",
+                data=auth_payload,
+                headers=self._jellyfin_auth_header(),
+            )
+            if status == 200 and isinstance(body, dict):
+                token = body.get("AccessToken") or body.get("Token")
+                if token:
+                    label = "empty" if pw_attempt == "" else "real"
+                    logger.info(
+                        f"Authenticated to Jellyfin as '{JELLYFIN_USERNAME}' "
+                        f"(using {label} password)."
+                    )
+                    self._jellyfin_token = token
+                    return token
+        logger.warning(
+            f"Jellyfin login failed (tried empty + real password; last status={status}, body={body})"
         )
-        if status == 200 and isinstance(body, dict):
-            token = body.get("AccessToken") or body.get("Token")
-            if token:
-                logger.info(f"Authenticated to Jellyfin as '{JELLYFIN_USERNAME}'.")
-                self._jellyfin_token = token
-                return token
-        logger.warning(f"Jellyfin login failed (status={status}, body={body})")
         return None
 
     def configure_jellyfin_libraries(self):
@@ -771,6 +782,150 @@ class ServarrWire:
                 logger.warning(f"Jellyseerr -> {label} failed status={s} body={body}")
 
 
+def seed_jellyfin_admin_if_missing() -> bool:
+    """Pre-seed a Jellyfin admin user directly in the SQLite DB when none
+    exists. Used because Jellyfin v10.11's POST /Startup/FirstUser returns
+    405, so there's no API path to create the first admin.
+
+    Runs as a backup to the standard login flow. Safe and idempotent:
+      * No-op if /config/data/jellyfin.db doesn't exist yet (Jellyfin
+        hasn't run its first-boot migrations).
+      * No-op if any user already exists (won't overwrite manual setup).
+      * No-op if insert fails (logs and lets _jellyfin_login try empty
+        password).
+
+    Returns True if a user was inserted, False otherwise.
+    """
+    import sqlite3
+    import uuid as _uuid
+
+    db_path = "/config/data/jellyfin.db"
+    if not os.path.exists(db_path):
+        logger.info(
+            "Jellyfin DB not present yet (no %s); skipping seed.",
+            db_path,
+        )
+        return False
+    try:
+        conn = sqlite3.connect(db_path, timeout=10)
+    except sqlite3.DatabaseError as exc:
+        logger.warning(f"Cannot open Jellyfin DB: {exc}")
+        return False
+    try:
+        # Wait briefly for migrations to complete
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            try:
+                has_users = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='Users'"
+                ).fetchone()
+                if has_users:
+                    break
+            except sqlite3.DatabaseError:
+                pass
+            time.sleep(2)
+        else:
+            logger.warning("Users table never appeared; giving up on seed.")
+            return False
+
+        existing = conn.execute(
+            "SELECT Id FROM Users WHERE Username = ? OR NormalizedUsername = ?",
+            (JELLYFIN_USERNAME, JELLYFIN_USERNAME.upper()),
+        ).fetchone()
+        if existing:
+            logger.info(
+                f"Jellyfin user '{JELLYFIN_USERNAME}' already exists (id={existing[0]}); "
+                "skipping seed."
+            )
+            return False
+
+        cols_info = conn.execute("PRAGMA table_info(Users)").fetchall()
+        cols = [r[1] for r in cols_info]
+        notnull_by_col = {r[1]: r[3] for r in cols_info}
+
+        seed_defaults = {
+            "Username": JELLYFIN_USERNAME,
+            "NormalizedUsername": JELLYFIN_USERNAME.upper(),
+            "Password": None,
+            "MustUpdatePassword": 0,
+            "AuthenticationProviderId": "Default",
+            "PasswordResetProviderId": "Default",
+            "InvalidLoginAttemptCount": 0,
+            "MaxActiveSessions": 0,
+            "SubtitleMode": 0,
+            "PlayDefaultAudioTrack": 1,
+            "EnableLocalPassword": 1,
+            "EnableUserPreferenceAccess": 1,
+            "InternalId": 0,
+            "SyncPlayAccess": 0,
+            "RowVersion": 1,
+        }
+        user_id = str(_uuid.uuid4())
+        values = []
+        for col in cols:
+            if col == "Id":
+                values.append(user_id)
+                continue
+            if col in seed_defaults:
+                values.append(seed_defaults[col])
+            else:
+                values.append(None if notnull_by_col.get(col, 0) == 0 else 0)
+
+        placeholders = ",".join("?" * len(cols))
+        sql = f"INSERT INTO Users ({',{cols}'.replace("{',{'", ",")}) VALUES ({placeholders})".replace(
+            f",{cols[0]}", f",{cols[0]}"
+        )
+        # Simpler: just join columns
+        sql = f"INSERT INTO Users ({','.join(cols)}) VALUES ({placeholders})"
+        conn.execute(sql, values)
+        conn.commit()
+        logger.info(f"Seeded Jellyfin admin user '{JELLYFIN_USERNAME}' (id={user_id})")
+
+        # Try to grant IsAdministrator permission (best-effort)
+        try:
+            perm_cols_info = conn.execute("PRAGMA table_info(Permissions)").fetchall()
+            perm_cols = {r[1] for r in perm_cols_info}
+            fk_col = next(
+                (
+                    c
+                    for c in (
+                        "Permission_Permissions_Guid",
+                        "UserId",
+                        "User_id",
+                        "UserId1",
+                    )
+                    if c in perm_cols
+                ),
+                None,
+            )
+            if fk_col:
+                already = conn.execute(
+                    f"SELECT 1 FROM Permissions WHERE {fk_col} = ? AND Kind = 0 LIMIT 1",
+                    (user_id,),
+                ).fetchone()
+                if not already:
+                    row = {"Kind": 0, "Value": 1, "RowVersion": 1, fk_col: user_id}
+                    insert_cols = [c for c in row if c in perm_cols]
+                    if "Id" in perm_cols:
+                        insert_cols = [c for c in insert_cols if c != "Id"]
+                    placeholders2 = ",".join("?" * len(insert_cols))
+                    conn.execute(
+                        f"INSERT INTO Permissions ({','.join(insert_cols)}) "
+                        f"VALUES ({placeholders2})",
+                        [row[c] for c in insert_cols],
+                    )
+                    conn.commit()
+                    logger.info("Granted Jellyfin admin IsAdministrator permission.")
+        except sqlite3.DatabaseError as exc:
+            logger.warning(
+                f"Could not grant admin via Permissions ({exc}); "
+                "user can still log in, wire will upgrade later."
+            )
+        return True
+    finally:
+        conn.close()
+
+
 def main():
     logger.info("==========================================================")
     logger.info("   Taiflix Servarr Cross-Service Auto-Wiring Starting    ")
@@ -831,6 +986,11 @@ def main():
         wire.verify_jellyfin()
     except Exception as e:
         logger.warning(f"Jellyfin verify step failed: {e}")
+
+    try:
+        seed_jellyfin_admin_if_missing()
+    except Exception as e:
+        logger.warning(f"Jellyfin seed step failed: {e}")
 
     try:
         wire.configure_jellyfin_libraries()
