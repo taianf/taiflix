@@ -35,7 +35,7 @@ RADARR_API_KEY = os.getenv("RADARR_API_KEY", "")
 LIDARR_API_KEY = os.getenv("LIDARR_API_KEY", "")
 BAZARR_API_KEY = os.getenv("BAZARR_API_KEY", "")
 JELLYSEERR_API_KEY = os.getenv("JELLYSEERR_API_KEY", "")
-JELLYFIN_USERNAME = os.getenv("JELLYFIN_USERNAME", "taiflix")
+JELLYFIN_USERNAME = os.getenv("JELLYFIN_USERNAME", "taian")
 JELLYFIN_ADMIN_PASSWORD = os.getenv("JELLYFIN_ADMIN_PASSWORD", ADMIN_PASSWORD)
 # JSON list of {name, collectionType, paths} for Jellyfin libraries.
 # Defaults match the canonical /media layout documented in README.md.
@@ -408,14 +408,16 @@ class ServarrWire:
 
         payload = {
             "name": "Jellyfin",
-            "implementation": "Jellyfin",
-            "configContract": "JellyfinSettings",
+            "implementation": "Emby",
+            "configContract": "EmbySettings",
             "fields": [
                 {"name": "host", "value": jf_host},
                 {"name": "port", "value": jf_port},
                 {"name": "useSsl", "value": jf_ssl},
+                {"name": "urlBase", "value": ""},
                 {"name": "apiKey", "value": jellyfin_token},
                 {"name": "sendNotifications", "value": False},
+                {"name": "updateLibrary", "value": True},
             ],
         }
         status, body, _ = http_request(
@@ -653,12 +655,12 @@ class ServarrWire:
                 logger.info(f"Library '{name}' already exists, skipping.")
                 continue
             payload = {
-                "Name": name,
-                "CollectionType": ctype,
-                "Paths": paths,
-                "RefreshStatus": "None",
-                "PreferredMetadataLanguage": "en",
-                "PreferredImageLanguage": "en",
+                "name": name,
+                "collectionType": ctype,
+                "paths": paths,
+                "refreshStatus": "None",
+                "preferredMetadataLanguage": "en",
+                "preferredImageLanguage": "en",
             }
             status, body, _ = http_request(
                 f"{base}/Library/VirtualFolders",
