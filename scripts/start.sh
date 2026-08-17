@@ -57,6 +57,29 @@ if [[ "${HAS_K8S}" == "false" ]]; then
         echo -e "       sudo pacman -S --needed kubectl helm k3d (on Arch/CachyOS)"
         echo -e "       or brew install kubectl helm k3d"
     fi
+
+    # k3s/k3d's bundled Traefik is disabled above so we pin a stable
+    # controller. Install the official traefik/traefik chart -- idempotent.
+    if [[ "${HAS_K8S}" == "true" ]] && kubectl get ns kube-system >/dev/null 2>&1; then
+        echo -e "  Installing Traefik ingress controller..."
+        if ! helm repo list 2>/dev/null | grep -q '^traefik'; then
+            helm repo add traefik https://traefik.github.io/charts >/dev/null 2>&1 || true
+        fi
+        helm repo update >/dev/null 2>&1 || true
+        if helm upgrade --install traefik traefik/traefik \
+            --namespace kube-system \
+            --version "37.4.0" \
+            --set ingressClass.enabled=true \
+            --set ingressClass.isDefaultClass=true \
+            --set api.insecure=true \
+            --set ports.web.port=80 \
+            --set ports.websecure.port=443 \
+            --wait >/dev/null 2>&1; then
+            echo -e "  [${GREEN}✓${NC}] Traefik ingress controller deployed."
+        else
+            echo -e "  ${YELLOW}!${NC} Traefik install failed (cluster may still be starting). Re-run make start to retry."
+        fi
+    fi
 fi
 
 # 3. Apply Secret to Kubernetes
