@@ -61,3 +61,29 @@ fi
 kubectl config use-context "k3d-${CLUSTER_NAME}"
 
 echo -e "  [${GREEN}✓${NC}] Kubernetes cluster '${CLUSTER_NAME}' is ready!"
+
+# ----------------------------------------------------------------------------
+# Install Traefik ingress controller.
+# k3s's bundled Traefik is disabled above (--disable=traefik) so our
+# Ingress resources have a stable, repo-pinnable controller. Idempotent.
+# ----------------------------------------------------------------------------
+if ! kubectl get ns kube-system >/dev/null 2>&1; then
+    echo -e "  ${YELLOW}!${NC} kube-system not reachable yet, skipping Traefik install"
+else
+    echo -e "  Installing Traefik ingress controller..."
+    if ! helm repo list 2>/dev/null | grep -q '^traefik'; then
+        helm repo add traefik https://traefik.github.io/charts >/dev/null 2>&1 || true
+    fi
+    helm repo update >/dev/null 2>&1 || true
+    helm upgrade --install traefik traefik/traefik \
+        --namespace kube-system \
+        --version "37.4.0" \
+        --set ingressClass.enabled=true \
+        --set ingressClass.isDefaultClass=true \
+        --set api.insecure=true \
+        --set ports.web.port=80 \
+        --set ports.websecure.port=443 \
+        --wait >/dev/null 2>&1 && \
+        echo -e "  [${GREEN}✓${NC}] Traefik ingress controller deployed." || \
+        echo -e "  ${YELLOW}!${NC} Traefik install failed (cluster may still be starting). Re-run this script to retry."
+fi
