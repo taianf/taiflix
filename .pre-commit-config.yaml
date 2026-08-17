@@ -1,0 +1,51 @@
+# ==============================================================================
+# .pre-commit-config.yaml - Pre-commit Git Hook Configuration for Taiflix
+# ==============================================================================
+repos:
+  # Standard Git sanity & safety checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+        exclude: ^charts/.*/templates/.*$ # Helm templates contain Go templating syntax
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+      - id: detect-private-key
+
+  # YAML Linting
+  - repo: https://github.com/adrienverge/yamllint.git
+    rev: v1.35.1
+    hooks:
+      - id: yamllint
+        args: [-c, .yamllint.yaml]
+        exclude: ^charts/.*/templates/.*$ # Exclude raw Helm Go templates
+
+  # Shell script linting & formatting
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+        args: [-x]
+
+  # Python Linting & Formatting for auto-wiring scripts
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.2
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # Local validation hooks for Helm & Shell scripts
+  - repo: local
+    hooks:
+      - id: test-manifests
+        name: Validate Helm Charts & Manifests
+        entry: ./scripts/test-manifests.sh
+        language: script
+        pass_filenames: false
+        always_run: true

@@ -1,0 +1,42 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: taiflix-sonarr
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: "https://github.com/your-username/taiflix.git"
+    targetRevision: HEAD
+    path: charts/servarr-app
+    helm:
+      valuesObject:
+        appName: "sonarr"
+        image:
+          repository: "lscr.io/linuxserver/sonarr"
+          tag: "latest"
+        service:
+          port: 8989
+        secretKeyRef:
+          secretName: "servarr-secrets"
+          apiKeyEnvVar: "SONARR_API_KEY"
+        initSeedConfig:
+          enabled: true
+          port: 8989
+          authMethod: "Forms"
+        ingress:
+          enabled: true
+          host: "sonarr.taiflix.lan"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: media
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

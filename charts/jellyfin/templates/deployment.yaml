@@ -1,0 +1,133 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jellyfin
+  labels:
+    app.kubernetes.io/name: jellyfin
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: jellyfin
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: jellyfin
+    spec:
+      {{- if and .Values.hardware.nvidia.enabled (eq .Values.hardware.mode "nvidia") }}
+      runtimeClassName: {{ .Values.hardware.nvidia.runtimeClassName }}
+      {{- end }}
+      initContainers:
+        - name: jellyfin-hw-detect
+          image: alpine:3.20
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "==> Probing Jellyfin container hardware acceleration..."
+              mkdir -p /config
+              ENC_FILE="/config/encoding.xml"
+
+              HW_TYPE="none"
+              MODE="{{ .Values.hardware.mode }}"
+
+              if [ "$MODE" = "nvidia" ] || { [ "$MODE" = "auto" ] && [ -e /dev/nvidia0 ]; }; then
+                HW_TYPE="nvenc"
+                echo "Detected NVIDIA GPU -> Configuring NVENC acceleration."
+              elif [ "$MODE" = "qsv" ] || { [ "$MODE" = "auto" ] && [ -e /dev/dri/renderD128 ]; }; then
+                HW_TYPE="qsv"
+                echo "Detected Intel GPU (/dev/dri/renderD128) -> Configuring QuickSync (QSV) acceleration."
+              else
+                echo "No supported GPU device detected -> Defaulting to CPU / Software transcoding."
+              fi
+
+              if [ ! -f "$ENC_FILE" ]; then
+                cat <<EOF > "$ENC_FILE"
+              <?xml version="1.0" encoding="utf-8"?>
+              <EncodingOptions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+                <EncodingThreadCount>-1</EncodingThreadCount>
+                <TranscodingTempPath>/config/transcodes</TranscodingTempPath>
+                <DownMixAudioBoost>1</DownMixAudioBoost>
+                <EnableThrottling>true</EnableThrottling>
+                <ThrottleDelaySeconds>180</ThrottleDelaySeconds>
+                <HardwareAccelerationType>$HW_TYPE</HardwareAccelerationType>
+                <EnableHardwareEncoding>true</EnableHardwareEncoding>
+                <AllowHevcEncoding>true</AllowHevcEncoding>
+                <AllowAv1Encoding>true</AllowAv1Encoding>
+                <EnableVppToneMapping>true</EnableVppToneMapping>
+                <EnableToneMapping>true</EnableToneMapping>
+                <HardwareDecodingCodecs>
+                  <string>h264</string>
+                  <string>hevc</string>
+                  <string>vc1</string>
+                  <string>vp8</string>
+                  <string>vp9</string>
+                  <string>av1</string>
+                </HardwareDecodingCodecs>
+              </EncodingOptions>
+              EOF
+                echo "Created $ENC_FILE with $HW_TYPE acceleration."
+              else
+                echo "$ENC_FILE already exists."
+              fi
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            {{- if .Values.hardware.intel.enabled }}
+            - name: dri
+              mountPath: /dev/dri
+            {{- end }}
+      containers:
+        - name: jellyfin
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: PUID
+              value: "{{ .Values.env.PUID }}"
+            - name: PGID
+              value: "{{ .Values.env.PGID }}"
+            - name: TZ
+              value: "{{ .Values.env.TZ }}"
+            - name: JELLYFIN_PublishedServerUrl
+              value: "{{ .Values.env.JELLYFIN_PublishedServerUrl }}"
+            {{- if .Values.hardware.nvidia.enabled }}
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: "all"
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: "all"
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            {{- if .Values.persistence.media.enabled }}
+            - name: media
+              mountPath: {{ .Values.persistence.media.mountPath }}
+            {{- end }}
+            {{- if .Values.hardware.intel.enabled }}
+            - name: dri
+              mountPath: /dev/dri
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: jellyfin-config
+        {{- if .Values.persistence.media.enabled }}
+        - name: media
+          hostPath:
+            path: {{ .Values.persistence.media.hostPath }}
+            type: DirectoryOrCreate
+        {{- end }}
+        {{- if .Values.hardware.intel.enabled }}
+        - name: dri
+          hostPath:
+            path: {{ .Values.hardware.intel.devicePath }}
+        {{- end }}

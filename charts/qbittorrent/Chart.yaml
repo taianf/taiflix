@@ -1,0 +1,6 @@
+apiVersion: v2
+name: qbittorrent
+description: qBittorrent download client with optional Gluetun VPN sidecar
+type: application
+version: 1.0.0
+appVersion: "latest"

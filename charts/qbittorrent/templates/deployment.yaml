@@ -1,0 +1,131 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qbittorrent
+  labels:
+    app.kubernetes.io/name: qbittorrent
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: qbittorrent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: qbittorrent
+    spec:
+      initContainers:
+        - name: init-qbittorrent-config
+          image: alpine:3.20
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "==> Pre-configuring qBittorrent.conf..."
+              CONF_DIR="/config/qBittorrent"
+              mkdir -p "$CONF_DIR"
+              CONF_FILE="$CONF_DIR/qBittorrent.conf"
+              if [ ! -f "$CONF_FILE" ]; then
+                cat <<EOF > "$CONF_FILE"
+              [BitTorrent]
+              Session\DefaultSavePath=/media/downloads/completed
+              Session\TempPath=/media/downloads/incomplete
+              Session\TempPathEnabled=true
+
+              [LegalNotice]
+              Accepted=true
+
+              [Preferences]
+              WebUI\Address=*
+              WebUI\Port=8080
+              WebUI\CSRFProtection=false
+              WebUI\ClickjackingProtection=false
+              WebUI\HostHeaderValidation=false
+              WebUI\Password_PBKDF2="${QB_HASH}"
+              WebUI\Username=admin
+              EOF
+                echo "Created $CONF_FILE"
+              fi
+          env:
+            - name: QB_HASH
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-secrets
+                  key: QBITTORRENT_PBKDF2_HASH
+          volumeMounts:
+            - name: config
+              mountPath: /config
+      containers:
+        {{- if .Values.vpn.enabled }}
+        - name: gluetun
+          image: "{{ .Values.vpn.image.repository }}:{{ .Values.vpn.image.tag }}"
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+          env:
+            - name: VPN_SERVICE_PROVIDER
+              value: "{{ .Values.vpn.openvpn.provider }}"
+            - name: VPN_TYPE
+              value: "{{ .Values.vpn.type }}"
+            - name: WIREGUARD_PRIVATE_KEY
+              value: "{{ .Values.vpn.wireguard.privateKey }}"
+            - name: WIREGUARD_ADDRESSES
+              value: "{{ .Values.vpn.wireguard.addresses }}"
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.webPort }}
+              protocol: TCP
+            - name: torrent-tcp
+              containerPort: {{ .Values.service.torrentPort }}
+              protocol: TCP
+            - name: torrent-udp
+              containerPort: {{ .Values.service.torrentPort }}
+              protocol: UDP
+        {{- end }}
+        - name: qbittorrent
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: PUID
+              value: "{{ .Values.env.PUID }}"
+            - name: PGID
+              value: "{{ .Values.env.PGID }}"
+            - name: TZ
+              value: "{{ .Values.env.TZ }}"
+            - name: WEBUI_PORT
+              value: "{{ .Values.env.WEBUI_PORT }}"
+          {{- if not .Values.vpn.enabled }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.webPort }}
+              protocol: TCP
+            - name: torrent-tcp
+              containerPort: {{ .Values.service.torrentPort }}
+              protocol: TCP
+            - name: torrent-udp
+              containerPort: {{ .Values.service.torrentPort }}
+              protocol: UDP
+          {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            {{- if .Values.persistence.media.enabled }}
+            - name: media
+              mountPath: {{ .Values.persistence.media.mountPath }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: qbittorrent-config
+        {{- if .Values.persistence.media.enabled }}
+        - name: media
+          hostPath:
+            path: {{ .Values.persistence.media.hostPath }}
+            type: DirectoryOrCreate
+        {{- end }}

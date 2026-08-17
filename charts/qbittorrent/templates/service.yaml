@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: qbittorrent
+  labels:
+    app.kubernetes.io/name: qbittorrent
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.webPort }}
+      targetPort: http
+      protocol: TCP
+      name: http
+    - port: {{ .Values.service.torrentPort }}
+      targetPort: torrent-tcp
+      protocol: TCP
+      name: torrent-tcp
+    - port: {{ .Values.service.torrentPort }}
+      targetPort: torrent-udp
+      protocol: UDP
+      name: torrent-udp
+  selector:
+    app.kubernetes.io/name: qbittorrent

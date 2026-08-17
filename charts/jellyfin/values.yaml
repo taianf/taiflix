@@ -1,0 +1,49 @@
+image:
+  repository: "jellyfin/jellyfin"
+  tag: "latest"
+  pullPolicy: "IfNotPresent"
+
+service:
+  type: ClusterIP
+  port: 8096
+
+env:
+  PUID: 1000
+  PGID: 1000
+  TZ: "UTC"
+  JELLYFIN_PublishedServerUrl: "http://jellyfin.taiflix.lan"
+
+hardware:
+  # 'auto' probes container devices on startup, or set explicitly: 'nvidia', 'qsv', 'cpu'
+  mode: "auto"
+  nvidia:
+    enabled: true
+    runtimeClassName: "nvidia"
+  intel:
+    enabled: true
+    devicePath: "/dev/dri"
+
+persistence:
+  config:
+    enabled: true
+    size: 20Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+  media:
+    enabled: true
+    mountPath: /media
+    hostPath: /media
+
+ingress:
+  enabled: true
+  className: "traefik"
+  host: "jellyfin.taiflix.lan"
+  tls: []
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 512Mi
+  limits:
+    cpu: 4000m
+    memory: 4096Mi

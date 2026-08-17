@@ -1,0 +1,6 @@
+apiVersion: v2
+name: configarr
+description: Configarr auto-synchronizer for TRaSH Guides quality profiles and custom formats (Sonarr/Radarr/Lidarr)
+type: application
+version: 1.0.0
+appVersion: "latest"

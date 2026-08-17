@@ -1,0 +1,6 @@
+apiVersion: v2
+name: jellyfin
+description: Jellyfin media server with intelligent hardware acceleration auto-detection
+type: application
+version: 1.0.0
+appVersion: "latest"

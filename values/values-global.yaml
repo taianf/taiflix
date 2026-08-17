@@ -1,0 +1,39 @@
+# ==============================================================================
+# values/values-global.yaml - Global Shared Configuration for Taiflix
+# ==============================================================================
+
+global:
+  # Base domain name for ingress routing (e.g. *.taiflix.lan)
+  domain: "taiflix.lan"
+
+  # Timezone for container logs and scheduling
+  timezone: "UTC"
+
+  # User and group IDs for container permissions
+  puid: 1000
+  pgid: 1000
+
+  # Shared Storage Mount for Atomic Hardlinks
+  storage:
+    media:
+      hostPath: "/media" # Host path or NFS mount on the node
+      mountPath: "/media"
+      size: "1000Gi"
+      storageClassName: "" # Use hostPath or standard NFS storage class
+    config:
+      storageClassName: "local-path"
+      defaultSize: "10Gi"
+
+  # Ingress configuration
+  ingress:
+    enabled: true
+    ingressClassName: "traefik" # or "nginx"
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+      traefik.ingress.kubernetes.io/router.entrypoints: "web,websecure"
+    tls:
+      enabled: false # Set to true if cert-manager / TLS is configured
+
+  # Hardware acceleration defaults (overridden by values/hardware.yaml)
+  hardware:
+    transcodingMode: "auto"

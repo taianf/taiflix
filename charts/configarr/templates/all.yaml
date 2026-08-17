@@ -1,0 +1,98 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: configarr-config
+  labels:
+    app.kubernetes.io/name: configarr
+    app.kubernetes.io/instance: {{ .Release.Name }}
+data:
+  # Configarr reads /app/config/config.yml by default.
+  # !env tags pull values from container env vars, which are sourced
+  # from the servarr-secrets Kubernetes Secret via secretKeyRef.
+  config.yml: |
+    # TRaSH Guides Synchronization for Sonarr, Radarr, and Lidarr
+    sonarr:
+      sonarr-main:
+        base_url: http://sonarr:8989
+        api_key: !env SONARR_API_KEY
+        quality_definition:
+          type: series
+        include:
+          - template: sonarr-quality-definition-series
+          - template: sonarr-v4-quality-profile-web-1080p
+          - template: sonarr-v4-custom-formats-web-1080p
+
+    radarr:
+      radarr-main:
+        base_url: http://radarr:7878
+        api_key: !env RADARR_API_KEY
+        quality_definition:
+          type: movie
+        include:
+          - template: radarr-quality-definition-movie
+          - template: radarr-v5-quality-profile-remux-web-1080p
+          - template: radarr-v5-custom-formats-remux-web-1080p
+
+    lidarr:
+      lidarr-main:
+        base_url: http://lidarr:8686
+        api_key: !env LIDARR_API_KEY
+        # NOTE: TRaSH-Guides Lidarr template names follow the
+        # `lidarr-quality-definition-*` and `lidarr-v1-quality-profile-*`
+        # pattern (see https://trash-guides.info/Lidarr/). If upstream
+        # renames a template, update the `include:` list below to match.
+        include:
+          - template: lidarr-quality-definition-album
+          - template: lidarr-v1-quality-profile-album
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: configarr
+  labels:
+    app.kubernetes.io/name: configarr
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  schedule: "{{ .Values.schedule }}"
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: configarr
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: configarr
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              env:
+                - name: TZ
+                  value: "{{ .Values.env.TZ }}"
+                - name: SONARR_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: servarr-secrets
+                      key: SONARR_API_KEY
+                - name: RADARR_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: servarr-secrets
+                      key: RADARR_API_KEY
+                - name: LIDARR_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: servarr-secrets
+                      key: LIDARR_API_KEY
+              volumeMounts:
+                - name: config
+                  mountPath: /app/config/config.yml
+                  subPath: config.yml
+              resources:
+                {{- toYaml .Values.resources | nindent 16 }}
+          volumes:
+            - name: config
+              configMap:
+                name: configarr-config

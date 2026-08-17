@@ -1,0 +1,42 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: taiflix-prowlarr
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: "https://github.com/your-username/taiflix.git"
+    targetRevision: HEAD
+    path: charts/servarr-app
+    helm:
+      valuesObject:
+        appName: "prowlarr"
+        image:
+          repository: "lscr.io/linuxserver/prowlarr"
+          tag: "latest"
+        service:
+          port: 9696
+        secretKeyRef:
+          secretName: "servarr-secrets"
+          apiKeyEnvVar: "PROWLARR_API_KEY"
+        initSeedConfig:
+          enabled: true
+          port: 9696
+          authMethod: "Forms"
+        ingress:
+          enabled: true
+          host: "prowlarr.taiflix.lan"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: media
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

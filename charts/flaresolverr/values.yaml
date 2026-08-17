@@ -1,0 +1,21 @@
+image:
+  repository: "ghcr.io/flaresolverr/flaresolverr"
+  tag: "latest"
+  pullPolicy: "IfNotPresent"
+
+service:
+  type: ClusterIP
+  port: 8191
+
+env:
+  LOG_LEVEL: "info"
+  TZ: "UTC"
+  CAPTCHA_SOLVER: "none"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 1024Mi

@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.appName }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.appName }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Values.appName }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Values.appName }}
+    spec:
+      {{- if .Values.initSeedConfig.enabled }}
+      initContainers:
+        - name: init-config-seed
+          image: alpine:3.20
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "==> Seeding config.xml for {{ .Values.appName }}..."
+              mkdir -p /config
+              CONFIG_FILE="/config/config.xml"
+              if [ ! -f "$CONFIG_FILE" ]; then
+                cat <<EOF > "$CONFIG_FILE"
+              <Config>
+                <Port>{{ .Values.initSeedConfig.port }}</Port>
+                <UrlBase>{{ .Values.initSeedConfig.urlBase }}</UrlBase>
+                <BindAddress>*</BindAddress>
+                <ApiKey>${API_KEY}</ApiKey>
+                <AuthenticationMethod>{{ .Values.initSeedConfig.authMethod | default "None" }}</AuthenticationMethod>
+                <AuthenticationRequired>{{ .Values.initSeedConfig.authRequired | default "DisabledForLocalAddresses" }}</AuthenticationRequired>
+                <Branch>main</Branch>
+                <LogLevel>info</LogLevel>
+                <LaunchBrowser>False</LaunchBrowser>
+                <InstanceName>{{ .Values.appName | title }}</InstanceName>
+              </Config>
+              EOF
+                echo "Created $CONFIG_FILE with pre-seeded API key."
+              else
+                # Update ApiKey and Auth in existing config.xml if present
+                if grep -q "<ApiKey>" "$CONFIG_FILE"; then
+                  sed -i "s|<ApiKey>.*</ApiKey>|<ApiKey>${API_KEY}</ApiKey>|g" "$CONFIG_FILE"
+                else
+                  sed -i "s|</Config>|  <ApiKey>${API_KEY}</ApiKey>\n</Config>|g" "$CONFIG_FILE"
+                fi
+                sed -i "s|<AuthenticationRequired>.*</AuthenticationRequired>|<AuthenticationRequired>{{ .Values.initSeedConfig.authRequired | default "DisabledForLocalAddresses" }}</AuthenticationRequired>|g" "$CONFIG_FILE"
+                sed -i "s|<AuthenticationMethod>.*</AuthenticationMethod>|<AuthenticationMethod>{{ .Values.initSeedConfig.authMethod | default "None" }}</AuthenticationMethod>|g" "$CONFIG_FILE"
+                echo "Updated API key and auth in existing $CONFIG_FILE."
+              fi
+          env:
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretKeyRef.secretName }}
+                  key: {{ .Values.secretKeyRef.apiKeyEnvVar }}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+      {{- end }}
+      containers:
+        - name: {{ .Values.appName }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: PUID
+              value: "{{ .Values.env.PUID }}"
+            - name: PGID
+              value: "{{ .Values.env.PGID }}"
+            - name: TZ
+              value: "{{ .Values.env.TZ }}"
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            {{- if .Values.persistence.media.enabled }}
+            - name: media
+              mountPath: {{ .Values.persistence.media.mountPath }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: {{ .Values.appName }}-config
+        {{- if .Values.persistence.media.enabled }}
+        - name: media
+          hostPath:
+            path: {{ .Values.persistence.media.hostPath }}
+            type: DirectoryOrCreate
+        {{- end }}

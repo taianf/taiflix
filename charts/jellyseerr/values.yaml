@@ -1,0 +1,33 @@
+image:
+  repository: "fallenbagel/jellyseerr"
+  tag: "latest"
+  pullPolicy: "IfNotPresent"
+
+service:
+  type: ClusterIP
+  port: 5055
+
+env:
+  TZ: "UTC"
+  LOG_LEVEL: "info"
+
+persistence:
+  config:
+    enabled: true
+    size: 5Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+
+ingress:
+  enabled: true
+  className: "traefik"
+  host: "requests.taiflix.lan"
+  tls: []
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 1024Mi

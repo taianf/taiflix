@@ -1,0 +1,38 @@
+# Secret values files (Never commit real passwords/API keys)
+values/values-secret.yaml
+values/servarr-secrets.generated.yaml
+values/hardware.yaml
+*.generated.yaml
+*.secret.yaml
+.env
+.env.local
+*.key
+*.pem
+
+# Kubernetes / Helm generated files
+*.tgz
+*.lock
+.helm/
+
+# Python cache & virtual environments
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs & temp files
+*.log
+scratch/
+tmp/

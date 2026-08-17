@@ -1,0 +1,55 @@
+image:
+  repository: "lscr.io/linuxserver/qbittorrent"
+  tag: "latest"
+  pullPolicy: "IfNotPresent"
+
+service:
+  type: ClusterIP
+  webPort: 8080
+  torrentPort: 6881
+
+env:
+  PUID: 1000
+  PGID: 1000
+  TZ: "UTC"
+  WEBUI_PORT: "8080"
+
+# Optional Gluetun VPN Sidecar
+vpn:
+  enabled: false
+  image:
+    repository: "qmcgaw/gluetun"
+    tag: "latest"
+  type: "wireguard" # or "openvpn"
+  wireguard:
+    privateKey: ""
+    addresses: ""
+  openvpn:
+    provider: "custom"
+    user: ""
+    password: ""
+
+persistence:
+  config:
+    enabled: true
+    size: 5Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+  media:
+    enabled: true
+    mountPath: /media
+    hostPath: /media
+
+ingress:
+  enabled: true
+  className: "traefik"
+  host: "qbittorrent.taiflix.lan"
+  tls: []
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 2000m
+    memory: 2048Mi

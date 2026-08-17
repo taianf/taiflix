@@ -1,0 +1,51 @@
+# Default values for servarr-app
+appName: "sonarr"
+image:
+  repository: "lscr.io/linuxserver/sonarr"
+  tag: "latest"
+  pullPolicy: "IfNotPresent"
+
+service:
+  type: ClusterIP
+  port: 8989
+
+env:
+  PUID: 1000
+  PGID: 1000
+  TZ: "UTC"
+
+secretKeyRef:
+  secretName: "servarr-secrets"
+  apiKeyEnvVar: "SONARR_API_KEY"
+
+initSeedConfig:
+  enabled: true
+  port: 8989
+  urlBase: ""
+  authMethod: "None"
+  authRequired: "DisabledForLocalAddresses"
+
+persistence:
+  config:
+    enabled: true
+    size: 10Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+  media:
+    enabled: true
+    mountPath: /media
+    hostPath: /media
+
+ingress:
+  enabled: true
+  className: "traefik"
+  host: "sonarr.taiflix.lan"
+  tls: []
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 1024Mi
