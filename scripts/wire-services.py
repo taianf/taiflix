@@ -408,18 +408,49 @@ class ServarrWire:
 
         payload = {
             "name": "Jellyfin",
-            "implementation": "Emby",
-            "configContract": "EmbySettings",
+            "implementation": "MediaBrowser",
+            "configContract": "MediaBrowserSettings",
+            # Sonarr/Radarr require these event toggles as top-level fields
+            # alongside 'fields' for the schema to validate the notification
+            # type (otherwise targetType is null on the server side).
+            "onGrab": False,
+            "onDownload": True,
+            "onUpgrade": True,
+            "onRename": True,
+            "onHealthIssue": False,
+            "onHealthRestored": False,
+            "onApplicationUpdate": True,
+            "onManualInteractionRequired": False,
+            "includeHealthWarnings": False,
             "fields": [
                 {"name": "host", "value": jf_host},
                 {"name": "port", "value": jf_port},
                 {"name": "useSsl", "value": jf_ssl},
                 {"name": "urlBase", "value": ""},
                 {"name": "apiKey", "value": jellyfin_token},
-                {"name": "sendNotifications", "value": False},
+                {"name": "notify", "value": False},
                 {"name": "updateLibrary", "value": True},
             ],
         }
+        if name == "Radarr":
+            payload.update(
+                {
+                    "onMovieAdded": True,
+                    "onMovieDelete": True,
+                    "onMovieFileDelete": True,
+                    "onMovieFileDeleteForUpgrade": True,
+                }
+            )
+        elif name == "Sonarr":
+            payload.update(
+                {
+                    "onSeriesAdd": True,
+                    "onSeriesDelete": True,
+                    "onEpisodeFileDelete": True,
+                    "onEpisodeFileDeleteForUpgrade": True,
+                    "onImportComplete": True,
+                }
+            )
         status, body, _ = http_request(
             f"{base_url}/api/{api_version}/notification",
             method="POST",
