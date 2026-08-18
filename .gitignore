@@ -37,3 +37,6 @@ Thumbs.db
 *.log
 scratch/
 tmp/
+
+# Local agent / IDE scratch state
+.opencode/
