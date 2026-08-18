@@ -380,12 +380,17 @@ class ServarrWire:
     def configure_arr_jellyfin_notify(
         self, name: str, base_url: str, api_key: str, jellyfin_token: str
     ):
-        """Add a 'Connect -> Jellyfin' notification on Sonarr/Radarr so they
-        refresh Jellyfin's library when an import happens. Idempotent: skips
-        if a connection with the same name already exists."""
-        if name not in ("Sonarr", "Radarr"):
+        """Add a 'Connect -> Jellyfin' notification on Sonarr/Radarr/Lidarr so
+        they refresh Jellyfin's library when an import happens. Idempotent:
+        skips if a connection with the same name already exists.
+
+        Sonarr and Radarr expose /api/v3/notification; Lidarr exposes
+        /api/v1/notification and uses a different set of event toggles.
+        Pattern borrowed from taianf/dotfiles:nixos/nixflix/default.nix.
+        """
+        if name not in ("Sonarr", "Radarr", "Lidarr"):
             return
-        api_version = "v3"
+        api_version = "v3" if name in ("Sonarr", "Radarr") else "v1"
         headers = {"X-Api-Key": api_key}
 
         # 1. List existing notifications; skip if Jellyfin already wired
@@ -449,6 +454,17 @@ class ServarrWire:
                     "onEpisodeFileDelete": True,
                     "onEpisodeFileDeleteForUpgrade": True,
                     "onImportComplete": True,
+                }
+            )
+        elif name == "Lidarr":
+            payload.update(
+                {
+                    "onAlbumAdded": True,
+                    "onAlbumDownload": True,
+                    "onArtistAdd": True,
+                    "onArtistDelete": True,
+                    "onTrackFileDelete": True,
+                    "onTrackFileDeleteForUpgrade": True,
                 }
             )
         status, body, _ = http_request(
@@ -1038,6 +1054,7 @@ def main():
         for label, base_url, api_key in [
             ("Sonarr", URLS["sonarr"], SONARR_API_KEY),
             ("Radarr", URLS["radarr"], RADARR_API_KEY),
+            ("Lidarr", URLS["lidarr"], LIDARR_API_KEY),
         ]:
             try:
                 wire.configure_arr_jellyfin_notify(label, base_url, api_key, jf_token)
