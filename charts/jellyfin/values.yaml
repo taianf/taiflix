@@ -1,6 +1,10 @@
 image:
   repository: "jellyfin/jellyfin"
-  tag: "latest"
+  # 10.10.7 is the last release before Jellyfin v10.11.x regressed
+  # POST /Startup/FirstUser to 405, which broke programmatic + wizard
+  # admin creation. Pinned to 10.10.7 to match the era of the nixflix
+  # reference implementation (taianf/dotfiles flake rev 6b0ae3e3c0cd...).
+  tag: "10.10.7"
   pullPolicy: "IfNotPresent"
 
 service:
