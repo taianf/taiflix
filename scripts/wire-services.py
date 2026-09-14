@@ -921,7 +921,7 @@ def seed_jellyfin_admin_if_missing() -> bool:
                 values.append(None if notnull_by_col.get(col, 0) == 0 else 0)
 
         placeholders = ",".join("?" * len(cols))
-        sql = f"INSERT INTO Users ({',{cols}'.replace("{',{'", ",")}) VALUES ({placeholders})".replace(
+        sql = f"INSERT INTO Users ({',{cols}'.replace("{',{'", ',')}) VALUES ({placeholders})".replace(
             f",{cols[0]}", f",{cols[0]}"
         )
         # Simpler: just join columns
