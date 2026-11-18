@@ -4,11 +4,27 @@
 # Run:     prek run --all-files
 
 repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+        name: Detect secrets with Gitleaks
+        description: Scan for hardcoded secrets, API keys, passwords, and tokens
+        args: [--redact, --staged, --exit-code=1]
+
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        name: Detect secrets with detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+        exclude: '\.env\.template|\.githooks/pre-commit'
+
   - repo: local
     hooks:
-      - id: secret-scan
-        name: Scan for secrets
-        entry: bash -c 'grep -nP "password\s*=\s*\"[^\"]*\"|apiKey\s*=\s*\"[^\"]*\"|api_key\s*=\s*\"[^\"]*\"|secret\s*=\s*\"[^\"]*\"|admin123|SecretApiKey|SecretPassword|BEGIN.*PRIVATE KEY|AKIA[0-9A-Z]{16}|ghp_[0-9a-zA-Z]{36}|glpat-[0-9a-zA-Z\-]{20}|xox[baprs]-[0-9a-zA-Z]{10,48}" --include="*" --exclude-dir=".git" --exclude="*.env.template" --exclude=".githooks/pre-commit" . && exit 1 || exit 0'
+      - id: no-env-file
+        name: Prevent committing .env files
+        entry: bash -c 'if git diff --cached --name-only | grep -qE "^\.env(\..*)?$" | grep -v "template"; then echo "❌ Do not commit .env files"; exit 1; fi; exit 0'
         language: system
         types: [text]
         pass_filenames: false
