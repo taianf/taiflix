@@ -2,6 +2,7 @@
 .env
 .env.*
 *.env
+!*.env.template
 secrets/
 *.secret
 
