@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Pre-commit hook to prevent committing secrets/passwords
+
+set -euo pipefail
+
+echo "Running secret scan..."
+
+# Patterns to block
+PATTERNS=(
+  'password\s*=\s*"[^"]*"'
+  'apiKey\s*=\s*"[^"]*"'
+  'api_key\s*=\s*"[^"]*"'
+  'secret\s*=\s*"[^"]*"'
+  'admin123'
+  'SecretApiKey'
+  'SecretPassword'
+  'BEGIN.*PRIVATE KEY'
+  'AKIA[0-9A-Z]{16}'
+  'ghp_[0-9a-zA-Z]{36}'
+  'glpat-[0-9a-zA-Z\-]{20}'
+  'xox[baprs]-[0-9a-zA-Z]{10,48}'
+)
+
+# Get staged files
+STAGED=$(git diff --cached --name-only --diff-filter=ACM)
+
+if [ -z "$STAGED" ]; then
+  echo "No staged files."
+  exit 0
+fi
+
+FOUND=0
+for pattern in "${PATTERNS[@]}"; do
+  for file in $STAGED; do
+    if [ -f "$file" ]; then
+      # Skip .gitignore and .env.example files
+      if [[ "$file" == ".gitignore" ]] || [[ "$file" == ".env.example" ]] || [[ "$file" == ".githooks/pre-commit" ]]; then
+        continue
+      fi
+      if grep -nP "$pattern" "$file" 2>/dev/null; then
+        echo "❌ Potential secret found in $file matching pattern: $pattern"
+        FOUND=1
+      fi
+    fi
+  done
+done
+
+if [ "$FOUND" -eq 1 ]; then
+  echo ""
+  echo "Commit blocked: secrets detected. Remove them or use --no-verify to override."
+  exit 1
+fi
+
+echo "No secrets detected."
+exit 0
+

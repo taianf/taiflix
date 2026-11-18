@@ -1,0 +1,26 @@
+# Secrets / environment
+.env
+.env.*
+*.env
+secrets/
+*.secret
+
+# Nix build artifacts
+result
+result-*
+.nix-build
+.nix-gc-roots
+
+# Temporary files
+tmp_end.txt
+prowlarr-schema.json
+prowlarr-indexers.txt
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
