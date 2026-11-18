@@ -1,0 +1,15 @@
+# .pre-commit-config.yaml
+# Run with prek: https://github.com/j178/prek
+# Install: prek install
+# Run:     prek run --all-files
+
+repos:
+  - repo: local
+    hooks:
+      - id: secret-scan
+        name: Scan for secrets
+        entry: bash -c 'grep -nP "password\s*=\s*\"[^\"]*\"|apiKey\s*=\s*\"[^\"]*\"|api_key\s*=\s*\"[^\"]*\"|secret\s*=\s*\"[^\"]*\"|admin123|SecretApiKey|SecretPassword|BEGIN.*PRIVATE KEY|AKIA[0-9A-Z]{16}|ghp_[0-9a-zA-Z]{36}|glpat-[0-9a-zA-Z\-]{20}|xox[baprs]-[0-9a-zA-Z]{10,48}" --include="*" --exclude-dir=".git" --exclude="*.env.template" --exclude=".githooks/pre-commit" . && exit 1 || exit 0'
+        language: system
+        types: [text]
+        pass_filenames: false
+        always_run: true

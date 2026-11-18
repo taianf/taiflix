@@ -34,7 +34,7 @@ for pattern in "${PATTERNS[@]}"; do
   for file in $STAGED; do
     if [ -f "$file" ]; then
       # Skip .gitignore and .env.example files
-      if [[ "$file" == ".gitignore" ]] || [[ "$file" == ".env.example" ]] || [[ "$file" == ".githooks/pre-commit" ]]; then
+      if [[ "$file" == ".gitignore" ]] || [[ "$file" == ".env.example" ]] || [[ "$file" == ".githooks/pre-commit" ]] || [[ "$file" == ".pre-commit-config.yaml" ]]; then
         continue
       fi
       if grep -nP "$pattern" "$file" 2>/dev/null; then
@@ -53,4 +53,5 @@ fi
 
 echo "No secrets detected."
 exit 0
+
 
