@@ -1,0 +1,4 @@
+formatter:
+  type: basic
+  indent: 2
+  end_line: true
