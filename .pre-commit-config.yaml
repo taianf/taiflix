@@ -4,7 +4,7 @@
 # Run:     prek run --all-files
 repos:
   - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.18.4
+    rev: v8.30.0
     hooks:
       - id: gitleaks
         name: Detect secrets with Gitleaks
@@ -19,7 +19,7 @@ repos:
         args: ['--baseline', '.secrets.baseline']
         exclude: '\.env\.template|\.githooks/pre-commit'
   - repo: https://github.com/google/yamlfmt
-    rev: v0.19.0
+    rev: v0.21.0
     hooks:
       - id: yamlfmt
         name: Format YAML files with yamlfmt
